@@ -1,55 +1,59 @@
 //
-//  newinsightsView.swift
+//  InsightsView.swift
 //  napzzz
 //
-//  Created by Morris Romagnoli on 07/07/2025.
+//  Created by Morris Romagnoli on 06/07/2025.
 //
 
 import SwiftUI
 
-struct NewInsightsView: View {
-    @StateObject private var dataManager = InsightsDataManager.shared
-    @State private var selectedDate = Date()
+struct InsightsView: View {
+    @StateObject private var viewModel = InsightsViewModel()
     
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 0) {
-                    // Header
-                    InsightsHeaderSection(selectedDate: selectedDate)
+                    // Header with date
+                    InsightsHeaderSection(selectedDate: viewModel.selectedDate)
                     
                     // Day Selector
                     DaySelectorSection(
-                        sessions: dataManager.sleepSessions,
-                        selectedDate: selectedDate,
+                        weeklyData: viewModel.weeklyData,
+                        selectedDate: viewModel.selectedDate,
                         onDateSelected: { date in
-                            selectedDate = date
+                            viewModel.selectDate(date)
                         }
                     )
                     
-                    if let session = dataManager.getSessionForDate(selectedDate) {
+                    if let sleepData = viewModel.currentSleepData {
                         VStack(spacing: 20) {
-                            // Sleep Quality Card
-                            SleepQualityCard(session: session)
-                            
-                            // Sleep Times Card
-                            SleepTimesCard(session: session)
-                            
-                            // Sleep Phases Graph Card - MODIFIED SECTION
-                            SleepPhasesGraphCard(session: session)
-                            
-                            // Sound Events Card
-                            if !session.detectedSounds.isEmpty {
-                                SoundEventsCard(session: session)
+                            // Sleep Quality Section
+                            SleepQualitySection(
+                                sleepData: sleepData,
+                                showingQuality: viewModel.showingSleepQuality
+                            ) {
+                                viewModel.unlockSleepQuality()
                             }
                             
-                            // Noise Level Card
-                            NoiseLevelCard(session: session)
+                            // Sleep Times Section
+                            SleepTimesSection(sleepData: sleepData, viewModel: viewModel)
+                            
+                            // Sleep Goal Progress
+                            SleepGoalSection(sleepData: sleepData, viewModel: viewModel)
+                            
+                            // Sleep Phases Section with Graph
+                            SleepPhasesGraphSection(sleepData: sleepData, viewModel: viewModel)
+                            
+                            // Detected Sounds Section
+                            if !sleepData.detectedSounds.isEmpty {
+                                DetectedSoundsSection(sleepData: sleepData, viewModel: viewModel)
+                            }
                         }
                         .padding(.horizontal, 20)
                         .padding(.bottom, 100)
                     } else {
-                        NoSleepDataView()
+                        NoDataView()
                     }
                 }
             }
@@ -59,7 +63,6 @@ struct NewInsightsView: View {
     }
 }
 
-// MARK: - Header Section
 struct InsightsHeaderSection: View {
     let selectedDate: Date
     
@@ -92,21 +95,20 @@ struct InsightsHeaderSection: View {
     }
 }
 
-// MARK: - Day Selector Section
 struct DaySelectorSection: View {
-    let sessions: [SleepSessionData]
+    let weeklyData: [SleepData]
     let selectedDate: Date
     let onDateSelected: (Date) -> Void
     
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 15) {
-                ForEach(sessions, id: \.id) { session in
+                ForEach(weeklyData, id: \.id) { sleepData in
                     DayButton(
-                        session: session,
-                        isSelected: Calendar.current.isDate(session.date, inSameDayAs: selectedDate),
+                        sleepData: sleepData,
+                        isSelected: Calendar.current.isDate(sleepData.date, inSameDayAs: selectedDate),
                         onTap: {
-                            onDateSelected(session.date)
+                            onDateSelected(sleepData.date)
                         }
                     )
                 }
@@ -118,25 +120,25 @@ struct DaySelectorSection: View {
 }
 
 struct DayButton: View {
-    let session: SleepSessionData
+    let sleepData: SleepData
     let isSelected: Bool
     let onTap: () -> Void
     
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: 8) {
-                Text(dayNumber(session.date))
+                Text(dayNumber(sleepData.date))
                     .font(.title2)
                     .fontWeight(isSelected ? .bold : .medium)
                     .foregroundColor(isSelected ? .white : .gray)
                 
-                Text(dayName(session.date))
+                Text(dayName(sleepData.date))
                     .font(.caption)
                     .foregroundColor(isSelected ? .defaultAccent : .gray)
                 
                 // Sleep quality indicator
                 Circle()
-                    .fill(Color(session.sleepQuality.color))
+                    .fill(Color(sleepData.sleepQuality.color))
                     .frame(width: 8, height: 8)
                     .opacity(isSelected ? 1.0 : 0.6)
             }
@@ -168,34 +170,23 @@ struct DayButton: View {
     }
 }
 
-// MARK: - Sleep Quality Card
-struct SleepQualityCard: View {
-    let session: SleepSessionData
+struct SleepQualitySection: View {
+    let sleepData: SleepData
+    let showingQuality: Bool
+    let onUnlock: () -> Void
     
     var body: some View {
         VStack(spacing: 20) {
-            HStack {
-                Text("Sleep Quality")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Button(action: {}) {
-                    Image(systemName: "info.circle")
-                        .foregroundColor(.gray)
-                }
-            }
-            
             // Quality Circle
             ZStack {
+                // Background circle
                 Circle()
                     .stroke(Color.gray.opacity(0.3), lineWidth: 8)
-                    .frame(width: 150, height: 150)
+                    .frame(width: 200, height: 200)
                 
+                // Progress circle
                 Circle()
-                    .trim(from: 0, to: Double(session.sleepQuality.score) / 100.0)
+                    .trim(from: 0, to: showingQuality ? sleepData.sleepQuality.score : 0)
                     .stroke(
                         LinearGradient(
                             colors: [Color.defaultPrimary, Color.defaultAccent],
@@ -204,82 +195,132 @@ struct SleepQualityCard: View {
                         ),
                         style: StrokeStyle(lineWidth: 8, lineCap: .round)
                     )
-                    .frame(width: 150, height: 150)
+                    .frame(width: 200, height: 200)
                     .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 1.0), value: showingQuality)
                 
-                VStack(spacing: 4) {
-                    Text("\(session.sleepQuality.score)")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                    
-                    Text(session.sleepQuality.description)
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                VStack(spacing: 8) {
+                    if showingQuality {
+                        Text(sleepData.sleepQuality.rawValue)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Sleep Quality")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else {
+                        Button(action: onUnlock) {
+                            VStack(spacing: 8) {
+                                Text("Unlock")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        LinearGradient(
+                                            colors: [Color.defaultPrimary, Color.defaultAccent],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .cornerRadius(20)
+                                
+                                Text("to see Sleep Quality")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                    }
                 }
             }
         }
-        .padding(.vertical, 20)
-        .padding(.horizontal, 20)
-        .background(Color.defaultCardBackground)
-        .cornerRadius(16)
     }
 }
 
-// MARK: - Sleep Times Card
-struct SleepTimesCard: View {
-    let session: SleepSessionData
+struct SleepTimesSection: View {
+    let sleepData: SleepData
+    let viewModel: InsightsViewModel
     
     var body: some View {
-        VStack(spacing: 15) {
-            HStack {
-                Text("Sleep Times")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                
-                Spacer()
-            }
-            
-            HStack(spacing: 40) {
-                VStack(spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "moon.fill")
-                            .foregroundColor(.defaultSecondary)
-                        Text(formatTime(session.startTime))
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                    }
-                    Text("Bedtime")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                }
-                
-                VStack(spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "sun.max.fill")
-                            .foregroundColor(.defaultAccent)
-                        Text(formatTime(session.endTime))
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                    }
-                    Text("Wake Up")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+        HStack(spacing: 40) {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "moon.fill")
+                        .foregroundColor(.defaultSecondary)
+                    Text(viewModel.formatTime(sleepData.bedtime))
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
                 }
             }
             
             VStack(spacing: 8) {
-                Text(formatDuration(session.totalSleepTime))
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
+                HStack(spacing: 8) {
+                    Image(systemName: "sun.max.fill")
+                        .foregroundColor(.defaultAccent)
+                    Text(viewModel.formatTime(sleepData.wakeTime))
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .padding(.vertical, 20)
+    }
+}
+
+struct SleepGoalSection: View {
+    let sleepData: SleepData
+    let viewModel: InsightsViewModel
+    
+    var body: some View {
+        VStack(spacing: 15) {
+            HStack(spacing: 40) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(viewModel.formatDuration(sleepData.actualSleepTime))
+                            .font(.title)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        if sleepData.actualSleepTime < sleepData.sleepGoal {
+                            Image(systemName: "triangle.fill")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                    
+                    Text("Time asleep")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
                 
-                Text("Total Sleep Time")
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text(viewModel.formatDuration(sleepData.sleepGoal))
+                            .font(.title)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Text("Sleep Goal")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            if sleepData.actualSleepTime < sleepData.sleepGoal {
+                Text("You're \(viewModel.formatDuration(sleepData.timeAwayFromGoal)) away from reaching your sleep goal")
                     .font(.caption)
                     .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 10)
             }
         }
         .padding(.vertical, 20)
@@ -287,23 +328,11 @@ struct SleepTimesCard: View {
         .background(Color.defaultCardBackground)
         .cornerRadius(16)
     }
-    
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-    
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let hours = Int(duration) / 3600
-        let minutes = Int(duration) % 3600 / 60
-        return "\(hours)h \(minutes)m"
-    }
 }
 
-// MARK: - Sleep Phases Graph Card - MODIFIED SECTION
-struct SleepPhasesGraphCard: View {
-    let session: SleepSessionData
+struct SleepPhasesGraphSection: View {
+    let sleepData: SleepData
+    let viewModel: InsightsViewModel
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -321,98 +350,98 @@ struct SleepPhasesGraphCard: View {
                 }
             }
             
-            // Smooth Sleep Graph with Phase Indicators
-            SmoothSleepGraph(session: session)
+            // Sleep phases visualization with graph
+            SleepPhasesGraph(sleepData: sleepData, viewModel: viewModel)
             
-            // Time markers
-            HStack {
-                Text(formatTime(session.startTime))
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-                
-                Spacer()
-                
-                let middleTime = session.startTime.addingTimeInterval(session.totalSleepTime / 2)
-                Text(formatTime(middleTime))
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-                
-                Spacer()
-                
-                Text(formatTime(session.endTime))
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-            }
-            .padding(.trailing, 80) // Account for right side indicators
+            // Phase breakdown
+            SleepPhaseBreakdown(sleepData: sleepData, viewModel: viewModel)
         }
         .padding(.vertical, 20)
         .padding(.horizontal, 20)
         .background(Color.defaultCardBackground)
         .cornerRadius(16)
     }
-    
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
 }
 
-// MARK: - Smooth Sleep Graph - NEW COMPONENT
-struct SmoothSleepGraph: View {
-    let session: SleepSessionData
+struct SleepPhasesGraph: View {
+    let sleepData: SleepData
+    let viewModel: InsightsViewModel
     
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                // Main graph area (75% width)
-                ZStack {
-                    // Background
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.1))
-                        .frame(height: 120)
-                        .cornerRadius(8)
+        VStack(spacing: 15) {
+            // Main sleep graph with smooth curves
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    // Sleep graph area
+                    ZStack {
+                        // Background
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.1))
+                            .frame(height: 120)
+                        
+                        // Smooth sleep curve
+                        SmoothSleepCurve(
+                            sleepPhases: sleepData.sleepPhases,
+                            totalDuration: sleepData.totalSleepTime,
+                            graphWidth: geometry.size.width * 0.75,
+                            graphHeight: 120
+                        )
+                    }
+                    .frame(width: geometry.size.width * 0.75)
                     
-                    // Smooth sleep curve
-                    SmoothSleepCurve(
-                        sleepPhases: session.sleepPhases,
-                        totalDuration: session.totalSleepTime,
-                        graphWidth: geometry.size.width * 0.75,
-                        graphHeight: 120
-                    )
+                    // Right side sleep phase indicators
+                    VStack(spacing: 8) {
+                        SleepPhaseIndicator(
+                            phase: .awake,
+                            isCurrentPhase: getCurrentPhase() == .awake,
+                            currentHour: getCurrentHour()
+                        )
+                        
+                        SleepPhaseIndicator(
+                            phase: .light,
+                            isCurrentPhase: getCurrentPhase() == .light,
+                            currentHour: getCurrentHour()
+                        )
+                        
+                        SleepPhaseIndicator(
+                            phase: .deep,
+                            isCurrentPhase: getCurrentPhase() == .deep,
+                            currentHour: getCurrentHour()
+                        )
+                    }
+                    .frame(width: geometry.size.width * 0.25)
+                    .padding(.leading, 10)
                 }
-                .frame(width: geometry.size.width * 0.75)
-                
-                // Right side phase indicators (25% width)
-                VStack(spacing: 12) {
-                    SleepPhaseIndicator(
-                        phase: .awake,
-                        isCurrentPhase: getCurrentPhase() == .awake,
-                        currentHour: getCurrentHour()
-                    )
-                    
-                    SleepPhaseIndicator(
-                        phase: .light,
-                        isCurrentPhase: getCurrentPhase() == .light,
-                        currentHour: getCurrentHour()
-                    )
-                    
-                    SleepPhaseIndicator(
-                        phase: .deep,
-                        isCurrentPhase: getCurrentPhase() == .deep,
-                        currentHour: getCurrentHour()
-                    )
-                }
-                .frame(width: geometry.size.width * 0.25)
-                .padding(.leading, 10)
             }
+            .frame(height: 120)
+            
+            // Time markers
+            HStack {
+                Text(viewModel.formatTime(sleepData.bedtime))
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                
+                Spacer()
+                
+                // Middle time marker
+                let middleTime = sleepData.bedtime.addingTimeInterval(sleepData.totalSleepTime / 2)
+                Text(viewModel.formatTime(middleTime))
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                
+                Spacer()
+                
+                Text(viewModel.formatTime(sleepData.wakeTime))
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+            }
+            .padding(.trailing, geometry.size.width * 0.25) // Align with graph area
         }
-        .frame(height: 120)
     }
     
     private func getCurrentPhase() -> SleepPhaseType {
         // Get the most recent phase or simulate current phase
-        return session.sleepPhases.last?.type ?? .light
+        return sleepData.sleepPhases.last?.type ?? .light
     }
     
     private func getCurrentHour() -> String {
@@ -422,18 +451,29 @@ struct SmoothSleepGraph: View {
     }
 }
 
-// MARK: - Smooth Sleep Curve - NEW COMPONENT
 struct SmoothSleepCurve: View {
-    let sleepPhases: [SleepPhaseData]
+    let sleepPhases: [SleepPhase]
     let totalDuration: TimeInterval
     let graphWidth: CGFloat
     let graphHeight: CGFloat
     
     var body: some View {
         Canvas { context, size in
+            // Create smooth path through sleep phases
             let path = createSmoothSleepPath()
             
-            // Fill area under curve with gradient
+            // Create gradient fill
+            let gradient = LinearGradient(
+                colors: [
+                    Color.blue.opacity(0.6),
+                    Color.purple.opacity(0.4),
+                    Color.blue.opacity(0.2)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            
+            // Fill area under curve
             var fillPath = path
             fillPath.addLine(to: CGPoint(x: graphWidth, y: graphHeight))
             fillPath.addLine(to: CGPoint(x: 0, y: graphHeight))
@@ -441,9 +481,8 @@ struct SmoothSleepCurve: View {
             
             context.fill(fillPath, with: .linearGradient(
                 Gradient(colors: [
-                    Color.blue.opacity(0.4),
-                    Color.purple.opacity(0.3),
-                    Color.blue.opacity(0.1),
+                    Color.blue.opacity(0.3),
+                    Color.purple.opacity(0.2),
                     Color.clear
                 ]),
                 startPoint: CGPoint(x: 0, y: 0),
@@ -451,7 +490,7 @@ struct SmoothSleepCurve: View {
             ))
             
             // Draw smooth curve line
-            context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
         }
         .frame(width: graphWidth, height: graphHeight)
     }
@@ -459,129 +498,53 @@ struct SmoothSleepCurve: View {
     private func createSmoothSleepPath() -> Path {
         var path = Path()
         
-        // Convert sleep phases to data points
-        var dataPoints: [(x: CGFloat, y: CGFloat)] = []
-        var currentTime: TimeInterval = 0
-        
-        for phase in sleepPhases {
-            let x = CGFloat(currentTime / totalDuration) * graphWidth
-            let y = yPositionForPhase(phase.type)
-            dataPoints.append((x: x, y: y))
-            
-            currentTime += phase.duration
-            let endX = CGFloat(currentTime / totalDuration) * graphWidth
-            dataPoints.append((x: endX, y: y))
-        }
-        
-        // Create smooth curve through points
-        if !dataPoints.isEmpty {
-            path.move(to: CGPoint(x: dataPoints[0].x, y: dataPoints[0].y))
-            
-            for i in 1..<dataPoints.count {
-                let current = dataPoints[i]
-                let previous = dataPoints[i-1]
-                
-                // Create smooth curve using quadratic bezier
-                let controlPointX = (previous.x + current.x) / 2
-                let controlPointY = (previous.y + current.y) / 2
-                
-                path.addQuadCurve(
-                    to: CGPoint(x: current.x, y: current.y),
-                    control: CGPoint(x: controlPointX, y: controlPointY)
-                )
-            }
-        }
-        
-        return path
-    }
-    
-    private func yPositionForPhase(_ phase: SleepPhaseType) -> CGFloat {
-        switch phase {
-        case .awake:
-            return 20 // Top of graph
-        case .light:
-            return 60 // Middle
-        case .deep:
-            return 100 // Bottom
-        case .rem:
-            return 40 // Between light and awake
-        }
-    }
 }
 
-// MARK: - Sleep Phase Indicator - NEW COMPONENT
-struct SleepPhaseIndicator: View {
-    let phase: SleepPhaseType
-    let isCurrentPhase: Bool
-    let currentHour: String
+struct SleepPhaseBreakdown: View {
+    let sleepData: SleepData
+    let viewModel: InsightsViewModel
     
     var body: some View {
-        HStack(spacing: 8) {
-            // Phase color indicator
-            Circle()
-                .fill(Color(phase.color))
-                .frame(width: 12, height: 12)
-                .overlay(
-                    Circle()
-                        .stroke(Color.white, lineWidth: isCurrentPhase ? 2 : 0)
-                        .frame(width: 16, height: 16)
-                )
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(phase.displayName)
-                    .font(.caption)
-                    .fontWeight(isCurrentPhase ? .semibold : .medium)
-                    .foregroundColor(isCurrentPhase ? .white : .gray)
-                
-                if isCurrentPhase {
-                    Text(currentHour)
-                        .font(.caption2)
-                        .foregroundColor(.defaultAccent)
+        VStack(spacing: 8) {
+            ForEach(SleepPhaseType.allCases, id: \.self) { phaseType in
+                if let phase = sleepData.sleepPhases.first(where: { $0.type == phaseType }) {
+                    HStack {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(Color(phaseType.color))
+                                .frame(width: 12, height: 12)
+                            
+                            Text(viewModel.formatDuration(phase.duration))
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Spacer()
+                        
+                        Text(phaseType.displayName)
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
-            
-            Spacer()
         }
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isCurrentPhase ? Color.defaultAccent.opacity(0.2) : Color.clear)
-        )
-        .scaleEffect(isCurrentPhase ? 1.05 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isCurrentPhase)
     }
 }
 
-// MARK: - Sound Events Card
-struct SoundEventsCard: View {
-    let session: SleepSessionData
+struct DetectedSoundsSection: View {
+    let sleepData: SleepData
+    let viewModel: InsightsViewModel
     
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                Text("Sound Events")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Text("\(session.detectedSounds.count)")
-                    .font(.headline)
-                    .foregroundColor(.defaultAccent)
-            }
+            Text("Detected Sounds")
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
             
             VStack(spacing: 12) {
-                ForEach(session.detectedSounds.prefix(3)) { sound in
-                    SoundEventRow(sound: sound)
-                }
-                
-                if session.detectedSounds.count > 3 {
-                    Button(action: {}) {
-                        Text("View all \(session.detectedSounds.count) events")
-                            .font(.caption)
-                            .foregroundColor(.defaultAccent)
-                    }
+                ForEach(sleepData.detectedSounds) { sound in
+                    DetectedSoundRow(sound: sound, viewModel: viewModel)
                 }
             }
         }
@@ -592,8 +555,9 @@ struct SoundEventsCard: View {
     }
 }
 
-struct SoundEventRow: View {
-    let sound: SoundEvent
+struct DetectedSoundRow: View {
+    let sound: DetectedSound
+    let viewModel: InsightsViewModel
     
     var body: some View {
         HStack(spacing: 15) {
@@ -605,73 +569,42 @@ struct SoundEventRow: View {
                     .font(.headline)
                     .foregroundColor(.white)
                 
-                Text(formatTime(sound.timestamp))
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                // Intensity visualization
+                HStack(spacing: 2) {
+                    ForEach(0..<10, id: \.self) { index in
+                        Rectangle()
+                            .fill(Double(index) / 10.0 <= sound.intensity ? Color.defaultAccent : Color.gray.opacity(0.3))
+                            .frame(width: 3, height: 12)
+                    }
+                }
             }
             
             Spacer()
             
-            // Intensity bars
-            HStack(spacing: 2) {
-                ForEach(0..<5, id: \.self) { index in
-                    Rectangle()
-                        .fill(Double(index) / 5.0 <= sound.intensity ? Color.defaultAccent : Color.gray.opacity(0.3))
-                        .frame(width: 3, height: 12)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(viewModel.formatTime(sound.timestamp))
+                    .font(.caption)
+                    .foregroundColor(.white)
+                
+                Button(action: {}) {
+                    Image(systemName: "ellipsis")
+                        .foregroundColor(.gray)
                 }
+            }
+            
+            Button(action: {}) {
+                Image(systemName: "lock.fill")
+                    .foregroundColor(.gray)
+                    .frame(width: 24, height: 24)
+                    .background(Color.gray.opacity(0.2))
+                    .clipShape(Circle())
             }
         }
         .padding(.vertical, 8)
     }
-    
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
 }
 
-// MARK: - Noise Level Card
-struct NoiseLevelCard: View {
-    let session: SleepSessionData
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                Text("Ambient Noise")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Text("\(Int(session.averageNoiseLevel)) dB")
-                    .font(.headline)
-                    .foregroundColor(.defaultAccent)
-            }
-            
-            // Simple noise level visualization
-            HStack(spacing: 4) {
-                ForEach(0..<10, id: \.self) { index in
-                    Rectangle()
-                        .fill(Double(index) * 5 <= session.averageNoiseLevel ? Color.green : Color.gray.opacity(0.3))
-                        .frame(width: 8, height: 20)
-                }
-            }
-            
-            Text("Average noise level throughout the night")
-                .font(.caption)
-                .foregroundColor(.gray)
-        }
-        .padding(.vertical, 20)
-        .padding(.horizontal, 20)
-        .background(Color.defaultCardBackground)
-        .cornerRadius(16)
-    }
-}
-
-// MARK: - No Sleep Data View
-struct NoSleepDataView: View {
+struct NoDataView: View {
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "moon.zzz.fill")
@@ -693,6 +626,6 @@ struct NoSleepDataView: View {
 }
 
 #Preview {
-    NewInsightsView()
+    InsightsView()
         .preferredColorScheme(.dark)
 }
